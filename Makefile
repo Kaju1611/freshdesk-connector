@@ -1,20 +1,28 @@
 .PHONY: venv gen-key mint-token spec test-cred test-adapter test-mcp test-e2e test up
 
 VENV := .venv
-PY   := $(abspath $(VENV))/bin/python
+
+ifeq ($(OS),Windows_NT)
+    PY := $(abspath $(VENV))/Scripts/python.exe
+    TOUCH := type nul > $(VENV)/.ready
+else
+    PY := $(abspath $(VENV))/bin/python
+    TOUCH := touch $(VENV)/.ready
+endif
 
 # One virtualenv for all services (works on "externally managed" system Pythons too).
 $(VENV)/.ready: libs/common/pyproject.toml
 	python -m venv $(VENV)
 	$(PY) -m pip install -q --upgrade pip
 	$(PY) -m pip install -q -e libs/common fastapi uvicorn httpx cryptography pydantic-settings redis fakeredis pytest "mcp>=2.3,<3"
-	touch $@
+	$(TOUCH)
+
 venv: $(VENV)/.ready
 
 gen-key: venv
 	@$(PY) -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 mint-token:
-	@python3 scripts/mint_tenant_token.py $(TENANT)
+	@python scripts/mint_tenant_token.py $(TENANT)
 spec: venv
 	$(PY) scripts/export_tool_spec.py
 

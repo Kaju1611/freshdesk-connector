@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """Generate docs/mcp-tool-spec.json from the LIVE tool definitions (so it cannot drift).
 
     python scripts/export_tool_spec.py            # write docs/mcp-tool-spec.json
