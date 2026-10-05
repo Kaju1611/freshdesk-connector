@@ -1,0 +1,61 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]   # limiter/cache only; no persistence needed
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+
+  credential-service:
+    build:
+      context: .
+      dockerfile: services/credential-service/Dockerfile
+    environment:
+      MASTER_KEYS: ${MASTER_KEYS}
+      ADMIN_TOKEN: ${ADMIN_TOKEN}
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+    volumes:
+      - cred-data:/data
+    ports:
+      - "8001:8001"   # needed for onboarding; remove/firewall in prod
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8001/healthz')"]
+      interval: 10s
+
+  freshdesk-adapter:
+    build:
+      context: .
+      dockerfile: services/freshdesk-adapter/Dockerfile
+    environment:
+      CREDENTIAL_SERVICE_URL: http://credential-service:8001
+      INTERNAL_TOKEN: ${INTERNAL_TOKEN}
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN}
+      REDIS_URL: redis://redis:6379/0
+      TENANT_RPM: ${TENANT_RPM:-100}
+    depends_on:
+      redis: {condition: service_healthy}
+      credential-service: {condition: service_healthy}
+    # Stateless: scale with `docker compose up --scale freshdesk-adapter=3`
+    # (rate limits + cache are shared through Redis). Not published to the host;
+    # only the mcp-server (next step) will reach it.
+    expose:
+      - "8002"
+
+  mcp-server:
+    build:
+      context: .
+      dockerfile: services/mcp-server/Dockerfile
+    environment:
+      ADAPTER_URL: http://freshdesk-adapter:8002
+      ADAPTER_TOKEN: ${ADAPTER_TOKEN}
+      TENANT_TOKENS: ${TENANT_TOKENS}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:-}
+    depends_on:
+      - freshdesk-adapter
+    # Stateless (no sessions): scale freely behind a load balancer. Put TLS in front of this
+    # (Caddy/nginx/ALB); it is the only service that should be reachable from Agent Studio.
+    ports:
+      - "8003:8003"
+
+volumes:
+  cred-data:
